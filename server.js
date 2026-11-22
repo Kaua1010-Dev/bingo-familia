@@ -4,7 +4,9 @@ const {Server}=require('socket.io');
 const crypto=require('crypto');
 const app=express(),server=http.createServer(app),io=new Server(server,{cors:{origin:false}});
 app.use(express.static('public'));
+app.get('/health',(_req,res)=>res.json({ok:true,service:'bingo-familia'}));
 const rooms=new Map();
+// Render free services may restart: rooms in memory are not durable.
 const modes=['corners','row','column','diagonal','full'];
 const id=()=>crypto.randomBytes(12).toString('hex');
 const code=()=>crypto.randomBytes(3).toString('hex').toUpperCase();
@@ -23,7 +25,7 @@ io.on('connection',socket=>{
  socket.on('start',(_,cb)=>{const r=rooms.get(socket.data.roomCode),p=r?.players.get(socket.data.playerId);if(!r||!p||p.token!==r.admin)return fail(cb,'Somente o administrador');if(r.status!=='lobby'||![...r.players.values()].every(x=>x.ready&&x.avatar!==null&&x.online))return fail(cb,'Todos devem estar online e prontos');r.status='playing';ack(cb,{ok:true});send(r);});
  socket.on('draw',(_,cb)=>{const r=rooms.get(socket.data.roomCode),p=r?.players.get(socket.data.playerId);if(!r||!p||p.token!==r.admin||r.status!=='playing')return fail(cb,'Sorteio indisponível');const pool=Array.from({length:75},(_,i)=>i+1).filter(n=>!r.drawn.includes(n));if(!pool.length)return fail(cb,'Todas as bolas já saíram');const ball=pool[crypto.randomInt(pool.length)];r.drawn.push(ball);ack(cb,{ok:true,ball});io.to(r.code).emit('ball',{ball,index:r.drawn.length});send(r);});
  socket.on('mark',(n,cb)=>{const r=rooms.get(socket.data.roomCode),p=r?.players.get(socket.data.playerId);if(!p||r.status!=='playing')return fail(cb,'Partida não iniciada');if(!Number.isInteger(n)||n<1||n>75||!p.card.some(row=>row.includes(n)))return fail(cb,'Número não está na cartela');if(!r.drawn.includes(n))return fail(cb,'Número ainda não sorteado');p.marked=p.marked.includes(n)?p.marked.filter(x=>x!==n):[...p.marked,n];ack(cb,{ok:true,marked:p.marked});});
- socket.on('bingo',(_,cb)=>{const r=rooms.get(socket.data.roomCode),p=r?.players.get(socket.data.playerId);if(!p||r.status!=='playing')return fail(cb,'Partida não iniciada');const win=patternMatches(p,r);if(!win)return fail(cb,'Ainda não há bingo válido');const result={playerId:p.id,name:p.name,avatar:p.avatar,...win};r.wins.push(result);ack(cb,{ok:true});io.to(r.code).emit('winner',result);send(r);});
+ socket.on('bingo',(_,cb)=>{const r=rooms.get(socket.data.roomCode),p=r?.players.get(socket.data.playerId);if(!p||r.status!=='playing')return fail(cb,'Partida não iniciada');const win=patternMatches(p,r);if(!win)return fail(cb,'Ainda não há bingo válido');if(r.wins.some(w=>w.mode===win.mode))return fail(cb,'Esta modalidade já foi premiada');const result={playerId:p.id,name:p.name,avatar:p.avatar,...win};r.wins.push(result);ack(cb,{ok:true});io.to(r.code).emit('winner',result);send(r);});
  socket.on('disconnect',()=>{const r=rooms.get(socket.data.roomCode),p=r?.players.get(socket.data.playerId);if(p&&p.socketId===socket.id){p.online=false;send(r);}});
 });
 server.listen(process.env.PORT||3000,()=>console.log('Bingo ativo na porta '+(process.env.PORT||3000)));
